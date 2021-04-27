@@ -1,0 +1,11 @@
+[package]
+name = "downtone"
+version = "0.1.0"
+authors = ["jeffrey-m4k <52832383+jeffrey-m4k@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ggez = "0.5.1"
+mint = "0.5.6"

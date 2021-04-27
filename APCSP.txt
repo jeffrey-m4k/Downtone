@@ -1,0 +1,9 @@
+Libraries used:
+    - Rust standard library (std)
+    - Ggez game library (ggez)
+
+Some basic code referenced and adapted from the ggez Github repo and documentation, namely https://github.com/ggez/ggez/blob/master/examples/spritebatch.rs
+
+Emulogic font is freeware, https://www.fontspace.com/emulogic-font-f3327
+
+All music created by me
