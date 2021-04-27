@@ -1,10 +1,12 @@
+#![allow(dead_code)]
+
 use std::path;
 use std::env;
 use std::f32::consts::PI;
 use ggez::{Context, ContextBuilder, GameResult};
 use ggez::event::{self, EventHandler, KeyCode, KeyMods};
 use ggez::graphics;
-use ggez::graphics::{Text, TextFragment};
+use ggez::graphics::{Text, TextFragment, Rect};
 use ggez::nalgebra;
 use ggez::timer;
 use ggez::audio;
@@ -161,19 +163,22 @@ impl EventHandler for MainState {
             GameState::Menu(state) => match state {
                 MenuState::Main => {
                     let cycle_time: f32 = 4000.0;
-                    let logo = graphics::DrawParam::new()
-                        .src(graphics::Rect::new(48.0/128.0, 0.0, 65.0/128.0, 21.0/128.0))
-                        .dest(nalgebra::Point2::new(max_width / 2.0, max_height / 4.0 + 15.0 + (2.0 * PI * time / cycle_time).cos() * 5.0))
-                        .scale(nalgebra::Vector2::new(9.0, 9.0))
-                        .offset(nalgebra::Point2::new(0.5, 0.5));
-                    self.spritebatch.add(logo);
+                    {
+                        let logo = atlas_drawparam_base(ctx, Rect::new(48.0, 0.0, 65.0, 21.0))
+                            .dest(nalgebra::Point2::new(max_width / 2.0, max_height / 4.0 + 15.0 + (2.0 * PI * time / cycle_time).cos() * 5.0))
+                            .scale(nalgebra::Vector2::new(9.0, 9.0))
+                            .offset(nalgebra::Point2::new(0.5, 0.5));
+                        self.spritebatch.add(logo);
+                    }
 
-                    let bgr = graphics::Image::new(ctx, "/menu_bgr.png").expect("Could not load image!");
-                    let bgr_param = graphics::DrawParam::new()
-                        .dest(nalgebra::Point2::new(max_width / 2.0, max_height))
-                        .scale(nalgebra::Vector2::new(max_width / bgr.width() as f32, max_height / bgr.height() as f32 + (2.0 * PI * time / cycle_time / 2.0).sin() * 0.25))
-                        .offset(nalgebra::Point2::new(0.5, 1.0));
-                    graphics::draw(ctx, &bgr, bgr_param)?;
+                    {
+                        let bgr = graphics::Image::new(ctx, "/menu_bgr.png").expect("Could not load image!");
+                        let bgr_param = graphics::DrawParam::new()
+                            .dest(nalgebra::Point2::new(max_width / 2.0, max_height))
+                            .scale(nalgebra::Vector2::new(max_width / bgr.width() as f32, max_height / bgr.height() as f32 + (2.0 * PI * time / cycle_time / 2.0).sin() * 0.25))
+                            .offset(nalgebra::Point2::new(0.5, 1.0));
+                        graphics::draw(ctx, &bgr, bgr_param)?;
+                    }
 
                     if (time + 300.0) % 1263.0 > 631.5 {
                         let text_width = self.text_common[0].width(ctx);
@@ -191,17 +196,28 @@ impl EventHandler for MainState {
                 _ => {}
             },
             GameState::InGame => {
-                let player_rect: graphics::Rect = if self.player_vel.0 != 0.0 { 
-                    pick_frame_rect(ctx, graphics::Rect::new(0.0, 0.0, 24.0, 8.0), 3, 128.0, 128.0, 250.0, time) 
-                } else { 
-                    graphics::Rect::new(0.0, 0.0, 8.0/128.0, 8.0/128.0)
-                };
-                let player = graphics::DrawParam::new()
-                    .src(player_rect)
-                    .dest(nalgebra::Point2::new(self.get_player_x(ctx), self.get_player_y(ctx)))
-                    .scale(nalgebra::Vector2::new(if self.player_facing == Facing::Left { -8.0 } else { 8.0 }, 8.0))
-                    .offset(nalgebra::Point2::new(0.5, 0.5));
-                self.spritebatch.add(player);
+                {
+                    let player_rect: Rect = if self.player_vel.0 != 0.0 { 
+                        pick_frame_rect(ctx, Rect::new(0.0, 0.0, 26.0, 8.0), 3, 250.0, time) 
+                    } else { 
+                        Rect::new(0.0, 0.0, 8.0, 8.0)
+                    };
+                    let player = atlas_drawparam_base(ctx, player_rect)
+                        .dest(nalgebra::Point2::new(self.get_player_x(ctx), self.get_player_y(ctx)))
+                        .scale(nalgebra::Vector2::new(if self.player_facing == Facing::Left { -8.0 } else { 8.0 }, 8.0))
+                        .offset(nalgebra::Point2::new(0.5, 0.5));
+                    self.spritebatch.add(player);
+                }
+
+                {
+                    let hp_bar = atlas_drawparam_base(ctx, Rect::new(48.0, 29.0, 49.0, 6.0))
+                        .dest(nalgebra::Point2::new(max_width - 8.0, 8.0))
+                        .scale(nalgebra::Vector2::new(8.0, 8.0))
+                        .offset(nalgebra::Point2::new(1.0, 0.0));
+                    let hp_bar_frame = hp_bar.src(atlas_rect(ctx, Rect::new(48.0, 22.0, 49.0, 6.0)));
+                    self.spritebatch.add(hp_bar);
+                    self.spritebatch.add(hp_bar_frame);
+                }
             },
             _ => {}
         };
@@ -226,18 +242,32 @@ impl EventHandler for MainState {
     }
 }
 
-fn pick_frame_rect(_ctx: &mut Context, frame_rect: graphics::Rect, frames: usize, img_width: f32, img_height: f32, interval: f32, cur_time: f32) -> graphics::Rect {
+const ATLAS_WIDTH: f32 = 128.0;
+const ATLAS_HEIGHT: f32 = 128.0;
+
+/// Converts a Rect to texture atlas coordinates
+fn atlas_rect(_ctx: &mut Context, rect: Rect) -> Rect {
+    Rect::new(rect.x/ATLAS_WIDTH, rect.y/ATLAS_HEIGHT, rect.w/ATLAS_WIDTH, rect.h/ATLAS_HEIGHT)
+}
+
+/// Generates a DrawParam for an atlas texture with the given Rect as src
+fn atlas_drawparam_base(ctx: &mut Context, rect: Rect) -> graphics::DrawParam {
+    graphics::DrawParam::new().src(atlas_rect(ctx, rect))
+}
+
+/// Picks the next frame from a given atlas Rect based on current game time
+fn pick_frame_rect(_ctx: &mut Context, frame_rect: Rect, frames: usize, interval: f32, cur_time: f32) -> Rect {
+    assert!(frame_rect.x+frame_rect.w < ATLAS_WIDTH && frame_rect.y+frame_rect.h < ATLAS_HEIGHT);
     let anim_length: f32 = interval * frames as f32;
     let frame_index: usize = ((cur_time%anim_length/anim_length)*frames as f32) as usize;
-    let frame_width: f32 = frame_rect.w/frames as f32;
+    let frame_width: f32 = (frame_rect.w-frames as f32+1.0)/frames as f32;
 
-    let rect = graphics::Rect::new(
-        (frame_rect.x/img_width + frame_index as f32*frame_width)/img_width, 
-        (frame_rect.y/img_height)/img_height, 
-        frame_width/img_width, 
-        frame_rect.h/img_height
+    let rect = Rect::new(
+        frame_rect.x/ATLAS_WIDTH + frame_index as f32*frame_width + frame_index as f32, 
+        frame_rect.y/ATLAS_HEIGHT, 
+        frame_width, 
+        frame_rect.h
     );
-    //println!("Rect X: {} | Rect Y: {} | Rect W: {} | Rect H: {} | Frame Number: {}", rect.x, rect.y, rect.w, rect.h, frame_index);
 
     rect
 }
