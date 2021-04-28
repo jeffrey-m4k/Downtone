@@ -1,13 +1,14 @@
 use std::path;
 use std::io::Read;
 use ggez::{Context, GameResult};
-use ggez::graphics::Rect;
+use ggez::graphics::{Rect, Color};
 use ggez::filesystem;
 
-const LEVEL_WIDTH: f32 = 16.0;
+pub const LEVEL_WIDTH: f32 = 16.0;
 
 pub struct Level {
-    pub tiles: Vec<Vec<LevelTile>>
+    pub tiles: Vec<Vec<LevelTile>>,
+    pub color: Color
 }
 
 impl Level {
@@ -26,6 +27,12 @@ impl Level {
             self.tiles.push(temp_vec);
         }
     }
+}
+
+pub fn screen_to_lvl_coords(_ctx: &mut Context, x: f32, y: f32, screen_w: f32, _screen_h: f32) -> (f32, f32) {
+    let _x_cap = TILE_DIMS * 6.0 / screen_w;
+    let x_offset = 6.0 * (screen_w / 6.0 / TILE_DIMS - LEVEL_WIDTH) / 2.0;
+    ((x + x_offset) / TILE_DIMS / 6.0, y / TILE_DIMS / 6.0)
 }
 
 #[derive(Clone, Debug)]
@@ -93,54 +100,58 @@ impl LevelTile {
         let atlas_region = TILE_REGIONS[self.tile_type as usize];
         assert!(atlas_region.w == 71.0 && atlas_region.h == 17.0, "Invalid atlas region for tile!");
         let adjacent: [bool; 4] = [
-            if y>0 { comp_tile(ctx, &piece, x, y-1, &self.tile_type) } else { false },
-            if x<usize::MAX { comp_tile(ctx, &piece, x+1, y, &self.tile_type) } else { false },
-            if y<usize::MAX { comp_tile(ctx, &piece, x, y+1, &self.tile_type) } else { false },
-            if x>0 { comp_tile(ctx, &piece, x-1, y, &self.tile_type) } else { false }
+            if x>0 { comp_tile(ctx, &piece, y, x-1, &self.tile_type) } else { true },
+            if y<LEVEL_WIDTH as usize-1 { comp_tile(ctx, &piece, y+1, x, &self.tile_type) } else { true },
+            if x<LEVEL_WIDTH as usize-1 { comp_tile(ctx, &piece, y, x+1, &self.tile_type) } else { true },
+            if y>0 { comp_tile(ctx, &piece, y-1, x, &self.tile_type) } else { true },
         ];
-        let tex = match adjacent.iter().filter(|&x| *x).count() {
-            0 => { get_tile_texture_rect(ctx, atlas_region, 0) },
-            1 => {
-                if adjacent[0] { get_tile_texture_rect(ctx, atlas_region, 14) }
-                else if adjacent[1] { get_tile_texture_rect(ctx, atlas_region, 6) }
-                else if adjacent[2] { get_tile_texture_rect(ctx, atlas_region, 7) }
-                else { get_tile_texture_rect(ctx, atlas_region, 15) }
-            },
-            2 => {
-                if adjacent[0] {
-                    if adjacent[1] { get_tile_texture_rect(ctx, atlas_region, 9) }
-                    else if adjacent[2] { get_tile_texture_rect(ctx, atlas_region, 5) }
-                    else { get_tile_texture_rect(ctx, atlas_region, 10) }
-                } else if adjacent[1] {
-                    if adjacent[2] { get_tile_texture_rect(ctx, atlas_region, 1) }
-                    else { get_tile_texture_rect(ctx, atlas_region, 13) }
-                } else {
-                    get_tile_texture_rect(ctx, atlas_region, 2)
-                }
-            },
-            3 => {
-                if !adjacent[0] { get_tile_texture_rect(ctx, atlas_region, 4) }
-                else if !adjacent[1] { get_tile_texture_rect(ctx, atlas_region, 12) }
-                else if !adjacent[2] { get_tile_texture_rect(ctx, atlas_region, 3) }
-                else { get_tile_texture_rect(ctx, atlas_region, 11) }
-            },
-            4 => { get_tile_texture_rect(ctx, atlas_region, 8) },
-            _ => { panic!("This should never happen") }
-        };
+        let tex_id = if adjacent[0] {
+            if adjacent[1] {
+                if adjacent[2] {
+                    if adjacent[3] { 8 } // 0,1,2,3
+                    else { 3 } // 0,1,2
+                } 
+                else if adjacent[3] { 11 } // 0,1,3
+                else { 9 } // 0,1
+            } 
+            else if adjacent[2] {
+                if adjacent[3] { 12 } // 0,2,3
+                else { 5 } // 0,2
+            }
+            else if adjacent[3] { 10 } // 0,3
+            else { 14 } // 0
+        }
+        else if adjacent[1] { 
+            if adjacent[2] {
+                if adjacent[3] { 4 } // 1,2,3
+                else { 1 } // 1,2
+            }
+            else if adjacent[3] { 13 } // 1,3
+            else { 6 } // 1
+        }
+        else if adjacent[2] {
+            if adjacent[3] { 2 } // 2,3
+            else { 7 } // 2
+        } 
+        else if adjacent[3] { 15 } // 3
+        else { 0 }; // none
+        //println!("({:?}, {:?}): {:?} | {:?}", x, y, tex_id, adjacent);
+        let tex = get_tile_texture_rect(ctx, atlas_region, tex_id);
         self.tile_texture = Some(tex);
     }
 }
 
 pub struct Generator {
-    pub pieces: Vec<LevelPiece>
+    pub pieces: Vec<LevelPiece>,
+    pub colors: [Color; 4]
 }
 
 pub const TILE_DIMS: f32 = 8.0;
 const TILE_ROW_SIZE: f32 = 8.0;
 
 pub fn get_tile_texture_rect(_ctx: &mut Context, region: Rect, index: usize) -> Rect {
-    let col: f32 = index as f32 % TILE_ROW_SIZE;
-    let row: f32 = index as f32 / TILE_ROW_SIZE;
+    let col: f32 = (index as u32 % TILE_ROW_SIZE as u32) as f32; 
+    let row: f32 = (index as u32 / TILE_ROW_SIZE as u32) as f32;
     Rect::new(region.x + (TILE_DIMS + 1.0) * col, region.y + (TILE_DIMS + 1.0) * row, TILE_DIMS, TILE_DIMS)
 }
 
@@ -151,7 +162,6 @@ pub fn get_tile(_ctx: &mut Context, piece: &LevelPiece, x: usize, y: usize) -> O
     if piece_w == 0 { return None }
     if x >= piece_w || y >= piece_h { return None }
 
-    //println!("Some({:?}.data[{:?}][{:?}]) | piece_h = {:?}, piece_w = {:?}", piece, x, y, piece_h, piece_w);
     Some(piece.data[y][x])
 }
 

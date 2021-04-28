@@ -6,12 +6,13 @@ use std::f32::consts::PI;
 use ggez::{Context, ContextBuilder, GameResult};
 use ggez::event::{self, EventHandler, KeyCode, KeyMods};
 use ggez::graphics;
-use ggez::graphics::{Text, TextFragment, Rect, Scale, DEFAULT_FONT_SCALE};
-use ggez::nalgebra;
+use ggez::graphics::{Text, TextFragment, Rect, Scale, DEFAULT_FONT_SCALE, Color};
+use ggez::nalgebra::{Point2, Vector2};
 use ggez::timer;
 use ggez::audio;
 use ggez::audio::SoundSource;
 use ggez::input::keyboard;
+use fastrand;
 
 mod level;
 
@@ -57,7 +58,8 @@ struct MainState {
     player_vel: (f32, f32),
     player_facing: Facing,
     generator: level::Generator,
-    level: level::Level
+    level: level::Level,
+    screen_size: (f32, f32)
 }
 
 impl MainState {
@@ -93,10 +95,21 @@ impl MainState {
 
         let piece = level::piece_from_dntp(ctx, "/piece/0.dntp").unwrap();
         let generator = level::Generator {
-            pieces: vec!(piece.clone())
+            pieces: vec!(piece.clone()),
+            colors: [
+                Color::from_rgb(77, 83, 102),
+                Color::from_rgb(77, 102, 83),
+                Color::from_rgb(102, 77, 83),
+                Color::from_rgb(102, 83, 77)
+            ]
         };
         let mut level = level::Level {
-            tiles: vec!()
+            tiles: vec!(),
+            color: {
+                let colors = generator.colors;
+                let i = fastrand::usize(..colors.len());
+                colors[i]
+            }
         };
         level.push_piece(ctx, &piece);
 
@@ -113,7 +126,8 @@ impl MainState {
             player_vel: (0.0, 0.0),
             player_facing: Facing::Right,
             generator: generator,
-            level: level
+            level: level,
+            screen_size: graphics::drawable_size(ctx)
         };
 
         Ok(state)
@@ -134,6 +148,17 @@ impl MainState {
         self.player_stats.health = clamp(self.player_stats.health + num, 0.0, self.player_stats.max_health);
         self.text_common[3] = Text::new(TextFragment::new(format!("{}", self.player_stats.health as i32)).font(self.font));
     }
+
+    /*fn check_player_collision(&self, _ctx: &mut Context) -> Option<Vec<Vector2<f32>>> {
+        let center = self.player_pos;
+
+    }*/
+    
+    /*fn is_player_grounded(&mut self, ctx: &mut Context) {
+        assert!(self.is_in_game(ctx), "Tried to check player state while not in game!");
+        let lvl_pos = level::screen_to_lvl_coords(ctx, self.player_pos.0, self.player_pos.1, self.screen_size.0, self.screen_size.1);
+
+    }*/
 }
 
 impl EventHandler for MainState {
@@ -181,7 +206,7 @@ impl EventHandler for MainState {
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
         graphics::clear(ctx, graphics::BLACK);
         graphics::set_default_filter(ctx, graphics::FilterMode::Nearest);
-        let (max_width, max_height): (f32, f32) = graphics::drawable_size(ctx);
+        let (max_width, max_height): (f32, f32) = (self.screen_size.0, self.screen_size.1);
         let time = (timer::duration_to_f64(timer::time_since_start(ctx)) * 1000.0) as f32;
         let text_scalef: f32 = 2.0;
 
@@ -191,27 +216,27 @@ impl EventHandler for MainState {
                     let cycle_time: f32 = 4000.0;
                     {
                         let logo = atlas_drawparam_base(ctx, Rect::new(48.0, 0.0, 65.0, 21.0))
-                            .dest(nalgebra::Point2::new(max_width / 2.0, max_height / 4.0 + 15.0 + (2.0 * PI * time / cycle_time).cos() * 5.0))
-                            .scale(nalgebra::Vector2::new(9.0, 9.0))
-                            .offset(nalgebra::Point2::new(0.5, 0.5));
+                            .dest(Point2::new(max_width / 2.0, max_height / 4.0 + 15.0 + (2.0 * PI * time / cycle_time).cos() * 5.0))
+                            .scale(Vector2::new(9.0, 9.0))
+                            .offset(Point2::new(0.5, 0.5));
                         self.spritebatch.add(logo);
                     }
 
                     {
                         let bgr = graphics::Image::new(ctx, "/menu_bgr.png").expect("Could not load image!");
                         let bgr_param = graphics::DrawParam::new()
-                            .dest(nalgebra::Point2::new(max_width / 2.0, max_height))
-                            .scale(nalgebra::Vector2::new(max_width / bgr.width() as f32, max_height / bgr.height() as f32 + (2.0 * PI * time / cycle_time / 2.0).sin() * 0.25))
-                            .offset(nalgebra::Point2::new(0.5, 1.0));
+                            .dest(Point2::new(max_width / 2.0, max_height))
+                            .scale(Vector2::new(max_width / bgr.width() as f32, max_height / bgr.height() as f32 + (2.0 * PI * time / cycle_time / 2.0).sin() * 0.25))
+                            .offset(Point2::new(0.5, 1.0));
                         graphics::draw(ctx, &bgr, bgr_param)?;
                     }
                     
                     let text_width = self.text_common[1].width(ctx);
-                    graphics::queue_text(ctx, &self.text_common[1], nalgebra::Point2::new(-(text_width as f32)/2.0, (max_height/2.0 - 80.0)/text_scalef), None);
+                    graphics::queue_text(ctx, &self.text_common[1], Point2::new(-(text_width as f32)/2.0, (max_height/2.0 - 80.0)/text_scalef), None);
 
                     if (time + 300.0) % 1263.0 > 631.5 {
                         let text_width = self.text_common[0].width(ctx);
-                        graphics::queue_text(ctx, &self.text_common[0], nalgebra::Point2::new(-(text_width as f32) / 2.0, 35.0/* + (2.0 * PI * time / cycle_time / 2.0).sin() * 2.0*/), None);
+                        graphics::queue_text(ctx, &self.text_common[0], Point2::new(-(text_width as f32) / 2.0, 35.0/* + (2.0 * PI * time / cycle_time / 2.0).sin() * 2.0*/), None);
                     }
                 },
                 _ => {}
@@ -222,8 +247,9 @@ impl EventHandler for MainState {
                         for n in 0..self.level.tiles[i].len() {
                             //println!("self.level.tiles[{:?}][{:?}].tile_texture.unwrap()", i, n);
                             let tile = atlas_drawparam_base(ctx, self.level.tiles[i][n].tile_texture.unwrap())
-                                .dest(nalgebra::Point2::new(level::TILE_DIMS * 6.0 * n as f32, level::TILE_DIMS * 6.0 * i as f32))
-                                .scale(nalgebra::Vector2::new(6.0, 6.0));
+                                .dest(Point2::new(level::TILE_DIMS * 6.0 * (n as f32 + (max_width / 6.0 / level::TILE_DIMS - level::LEVEL_WIDTH) / 2.0), level::TILE_DIMS * 6.0 * i as f32))
+                                .scale(Vector2::new(6.0, 6.0))
+                                .color(self.level.color);
                             self.spritebatch.add(tile);
                         }
                     }
@@ -237,28 +263,36 @@ impl EventHandler for MainState {
                     };
                     let player_bounce = if self.player_vel.0 != 0.0 { 6.0 } else { 1.0 };
                     let player = atlas_drawparam_base(ctx, player_rect)
-                        .dest(nalgebra::Point2::new(self.get_player_x(ctx), self.get_player_y(ctx)))
-                        .scale(nalgebra::Vector2::new(
+                        .dest(Point2::new(self.get_player_x(ctx), self.get_player_y(ctx)))
+                        .scale(Vector2::new(
                             if self.player_facing == Facing::Left { -1.0 } else { 1.0 } * (5.9) + (2.0* PI*time/4000.0*player_bounce).sin() * 0.15, 
                             6.0 + (2.0 * PI * time / 4000.0 * player_bounce).cos() * 0.3))
-                        .offset(nalgebra::Point2::new(0.5, 1.0));
+                        .offset(Point2::new(0.5, 1.0));
                     self.spritebatch.add(player);
                 }
 
                 {
                     let hp_bar = atlas_drawparam_base(ctx, Rect::new(48.0, 27.0, 46.0, 4.0))
-                        .dest(nalgebra::Point2::new(80.0, 12.0))
-                        .scale(nalgebra::Vector2::new(6.0, 6.0))
-                        .offset(nalgebra::Point2::new(0.0, 0.0));
+                        .dest(Point2::new(80.0, 12.0))
+                        .scale(Vector2::new(6.0, 6.0))
+                        .offset(Point2::new(0.0, 0.0));
                     let hp_bar_frame = hp_bar.src(atlas_rect(ctx, Rect::new(48.0, 22.0, 46.0, 4.0)));
+
+                    let hp_bar_shadow = graphics::DrawParam::color(hp_bar.dest(Point2::new(80.0, 15.0)), Color::from_rgb(0,0,0));
+                    let hp_bar_frame_shadow = graphics::DrawParam::color(hp_bar_frame.dest(Point2::new(80.0, 15.0)), Color::from_rgb(0,0,0));
                     
                     let hp_prog: f32 = self.player_stats.health / self.player_stats.max_health;
 
-                    self.spritebatch.add(hp_bar.scale(nalgebra::Vector2::new(hp_prog * 6.0, 6.0)));
+                    self.spritebatch.add(hp_bar_shadow);
+                    self.spritebatch.add(hp_bar_frame_shadow);
+                    self.spritebatch.add(hp_bar.scale(Vector2::new(hp_prog * 6.0, 6.0)));
                     self.spritebatch.add(hp_bar_frame);
                     
-                    graphics::queue_text(ctx, &self.text_common[2], nalgebra::Point2::new(8.0 - max_width/2.0/text_scalef, 4.0 - max_height/2.0/text_scalef), None);
-                    graphics::queue_text(ctx, &self.text_common[3], nalgebra::Point2::new(184.0 - max_width/2.0/text_scalef, 4.0 - max_height/2.0/text_scalef), None);
+                    graphics::queue_text(ctx, &self.text_common[2], Point2::new(8.0 - max_width/2.0/text_scalef, 4.0 + 2.0 - max_height/2.0/text_scalef), Some(Color::from_rgb(0,0,0)));
+                    graphics::queue_text(ctx, &self.text_common[2], Point2::new(8.0 - max_width/2.0/text_scalef, 4.0 - max_height/2.0/text_scalef), None);
+
+                    graphics::queue_text(ctx, &self.text_common[3], Point2::new(184.0 - max_width/2.0/text_scalef, 4.0 + 2.0 - max_height/2.0/text_scalef), Some(Color::from_rgb(0,0,0)));
+                    graphics::queue_text(ctx, &self.text_common[3], Point2::new(184.0 - max_width/2.0/text_scalef, 4.0 - max_height/2.0/text_scalef), None);
                 }
             },
             _ => {}
@@ -266,9 +300,9 @@ impl EventHandler for MainState {
 
         graphics::draw(ctx, &self.spritebatch, graphics::DrawParam::new())?;
         graphics::draw_queued_text(ctx, graphics::DrawParam::new()
-            .dest(nalgebra::Point2::new(max_width/2.0, max_height/2.0))
-            .scale(nalgebra::Vector2::new(text_scalef, text_scalef))
-            .offset(nalgebra::Point2::new(0.5, 0.5)), 
+            .dest(Point2::new(max_width/2.0, max_height/2.0))
+            .scale(Vector2::new(text_scalef, text_scalef))
+            .offset(Point2::new(0.5, 0.5)), 
             None, graphics::FilterMode::Nearest).expect("Failed to draw text!");
         self.spritebatch.clear();
         graphics::present(ctx)?;
