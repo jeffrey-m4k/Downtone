@@ -13,7 +13,7 @@ use ggez::audio;
 use ggez::audio::SoundSource;
 use ggez::input::keyboard;
 
-mod draw;
+mod level;
 
 pub fn main() -> GameResult {
     let resource_dir = if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
@@ -55,7 +55,8 @@ struct MainState {
     player_stats: GameStats,
     player_pos: (f32, f32),
     player_vel: (f32, f32),
-    player_facing: Facing
+    player_facing: Facing,
+    generator: level::Generator
 }
 
 impl MainState {
@@ -68,7 +69,7 @@ impl MainState {
         music.set_repeat(true);
 
         let font_emulogic =  graphics::Font::new(ctx, "/font/emulogic.ttf").expect("Could not load font!");
-        
+
         graphics::set_default_filter(ctx, graphics::FilterMode::Nearest);
         let text_common: [_; 4] = [
             Text::new(TextFragment::new("PRESS ENTER").font(font_emulogic)),
@@ -100,8 +101,12 @@ impl MainState {
             player_stats: stats,
             player_pos: (100.0, 300.0),
             player_vel: (0.0, 0.0),
-            player_facing: Facing::Right
+            player_facing: Facing::Right,
+            generator: level::Generator {
+                pieces: vec!(level::piece_from_dntp(ctx, "/piece/0.dntp").unwrap())
+            }
         };
+        println!("{:?}", state.generator.pieces[0].data);
         Ok(state)
     }
 
@@ -209,30 +214,30 @@ impl EventHandler for MainState {
                     } else { 
                         Rect::new(0.0, 0.0, 8.0, 8.0)
                     };
-                    let player_bounce = if self.player_vel.0 != 0.0 { 8.0 } else { 1.0 };
+                    let player_bounce = if self.player_vel.0 != 0.0 { 6.0 } else { 1.0 };
                     let player = atlas_drawparam_base(ctx, player_rect)
                         .dest(nalgebra::Point2::new(self.get_player_x(ctx), self.get_player_y(ctx)))
                         .scale(nalgebra::Vector2::new(
-                            if self.player_facing == Facing::Left { -1.0 } else { 1.0 } * (7.9) + (2.0 * PI * time / 4000.0 * player_bounce).sin() * 0.15, 
-                            8.0 + (2.0 * PI * time / 4000.0 * player_bounce).cos() * 0.3))
+                            if self.player_facing == Facing::Left { -1.0 } else { 1.0 } * (5.9) + (2.0* PI*time/4000.0*player_bounce).sin() * 0.15, 
+                            6.0 + (2.0 * PI * time / 4000.0 * player_bounce).cos() * 0.3))
                         .offset(nalgebra::Point2::new(0.5, 1.0));
                     self.spritebatch.add(player);
                 }
 
                 {
                     let hp_bar = atlas_drawparam_base(ctx, Rect::new(48.0, 27.0, 46.0, 4.0))
-                        .dest(nalgebra::Point2::new(80.0, 8.0))
-                        .scale(nalgebra::Vector2::new(8.0, 8.0))
+                        .dest(nalgebra::Point2::new(80.0, 12.0))
+                        .scale(nalgebra::Vector2::new(6.0, 6.0))
                         .offset(nalgebra::Point2::new(0.0, 0.0));
                     let hp_bar_frame = hp_bar.src(atlas_rect(ctx, Rect::new(48.0, 22.0, 46.0, 4.0)));
                     
                     let hp_prog: f32 = self.player_stats.health / self.player_stats.max_health;
 
-                    self.spritebatch.add(hp_bar.scale(nalgebra::Vector2::new(hp_prog * 8.0, 8.0)));
+                    self.spritebatch.add(hp_bar.scale(nalgebra::Vector2::new(hp_prog * 6.0, 6.0)));
                     self.spritebatch.add(hp_bar_frame);
                     
                     graphics::queue_text(ctx, &self.text_common[2], nalgebra::Point2::new(8.0 - max_width/2.0/text_scalef, 4.0 - max_height/2.0/text_scalef), None);
-                    graphics::queue_text(ctx, &self.text_common[3], nalgebra::Point2::new(232.0 - max_width/2.0/text_scalef, 4.0 - max_height/2.0/text_scalef), None);
+                    graphics::queue_text(ctx, &self.text_common[3], nalgebra::Point2::new(184.0 - max_width/2.0/text_scalef, 4.0 - max_height/2.0/text_scalef), None);
                 }
             },
             _ => {}
@@ -262,12 +267,12 @@ const ATLAS_WIDTH: f32 = 128.0;
 const ATLAS_HEIGHT: f32 = 128.0;
 
 /// Converts a Rect to texture atlas coordinates
-fn atlas_rect(_ctx: &mut Context, rect: Rect) -> Rect {
+pub fn atlas_rect(_ctx: &mut Context, rect: Rect) -> Rect {
     Rect::new(rect.x/ATLAS_WIDTH, rect.y/ATLAS_HEIGHT, rect.w/ATLAS_WIDTH, rect.h/ATLAS_HEIGHT)
 }
 
 /// Generates a DrawParam for an atlas texture with the given Rect as src
-fn atlas_drawparam_base(ctx: &mut Context, rect: Rect) -> graphics::DrawParam {
+pub fn atlas_drawparam_base(ctx: &mut Context, rect: Rect) -> graphics::DrawParam {
     graphics::DrawParam::new().src(atlas_rect(ctx, rect))
 }
 
