@@ -46,7 +46,7 @@ enum MenuState {
     Options
 }
 
-struct MainState {
+pub struct MainState {
     state: GameState,
     paused: bool,
     spritebatch: graphics::spritebatch::SpriteBatch,
@@ -54,12 +54,13 @@ struct MainState {
     font: graphics::Font,
     text_common: [Text; 4],
     player_stats: GameStats,
-    player_pos: (f32, f32),
-    player_vel: (f32, f32),
+    player_pos: Vector2<f32>,
+    player_vel: Vector2<f32>,
     player_facing: Facing,
     generator: level::Generator,
     level: level::Level,
-    screen_size: (f32, f32)
+    screen_size: Vector2<f32>,
+    camera: CameraView
 }
 
 impl MainState {
@@ -88,7 +89,7 @@ impl MainState {
             max_health: 100.0,
             attack: 10,
             defense: 5,
-            speed: 10,
+            speed: 2.5,
             tone: 15,
             accessories: [None; 5]
         };
@@ -112,6 +113,9 @@ impl MainState {
             }
         };
         level.push_piece(ctx, &piece);
+        level.init_textures(ctx);
+
+        let drawable_size = graphics::drawable_size(ctx);
 
         let state = MainState {
             state: GameState::Menu(MenuState::Main),
@@ -122,12 +126,13 @@ impl MainState {
             font: font_emulogic,
             text_common: text_common,
             player_stats: stats,
-            player_pos: (100.0, 300.0),
-            player_vel: (0.0, 0.0),
+            player_pos: Vector2::new(150.0, 150.0),
+            player_vel: Vector2::new(0.0, 0.0),
             player_facing: Facing::Right,
             generator: generator,
             level: level,
-            screen_size: graphics::drawable_size(ctx)
+            screen_size: Vector2::new(drawable_size.0, drawable_size.1),
+            camera: CameraView::new()
         };
 
         Ok(state)
@@ -138,8 +143,8 @@ impl MainState {
         self.music_source.set_repeat(true);
     }
 
-    fn get_player_x(&self, _ctx: &mut Context) -> f32 { self.player_pos.0 }
-    fn get_player_y(&self, _ctx: &mut Context) -> f32 { self.player_pos.1 }
+    fn get_player_x(&self, _ctx: &mut Context) -> f32 { self.player_pos.x }
+    fn get_player_y(&self, _ctx: &mut Context) -> f32 { self.player_pos.y }
 
     fn is_in_game(&self, _ctx: &mut Context) -> bool { self.state == GameState::InGame }
 
@@ -149,16 +154,49 @@ impl MainState {
         self.text_common[3] = Text::new(TextFragment::new(format!("{}", self.player_stats.health as i32)).font(self.font));
     }
 
-    /*fn check_player_collision(&self, _ctx: &mut Context) -> Option<Vec<Vector2<f32>>> {
-        let center = self.player_pos;
-
-    }*/
-    
-    /*fn is_player_grounded(&mut self, ctx: &mut Context) {
+    fn is_player_colliding(&self, ctx: &mut Context, dir: Direction) -> bool {
         assert!(self.is_in_game(ctx), "Tried to check player state while not in game!");
-        let lvl_pos = level::screen_to_lvl_coords(ctx, self.player_pos.0, self.player_pos.1, self.screen_size.0, self.screen_size.1);
+        let lvl_pos = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x, self.screen_size.y);
 
-    }*/
+        let test_x = match dir {
+            Direction::Left => lvl_pos.0 as usize-1,
+            Direction::Right => lvl_pos.0 as usize+1,
+            _ => lvl_pos.0 as usize
+        };
+        let test_y = match dir {
+            Direction::Up => lvl_pos.1 as usize-1,
+            Direction::Down => lvl_pos.1 as usize+1,
+            _ => lvl_pos.1 as usize
+        };
+        let test_tile = self.level.get_tile(ctx, test_x, test_y);
+        let test_tile_b: Option<level::LevelTile>;
+        match test_tile {
+            Some(tile) => tile.collide && match dir {
+                Direction::Left => lvl_pos.0 % 1.0 < 0.5,
+                Direction::Right => lvl_pos.0 % 1.0 > 0.5,
+                Direction::Up => lvl_pos.1 % 1.0 < 0.5,
+                Direction::Down => lvl_pos.1 % 1.0 > 0.5
+            },
+            _ => false
+        }
+    }
+
+    fn get_camera_scroll(&self, ctx: &mut Context) -> Vector2<f32> {
+        assert!(self.is_in_game(ctx), "Tried to check camera state while not in game!");
+        let tile_size = level::get_tile_drawn_size(ctx, self.camera.scale);
+        let screen_y_half = self.screen_size.y / 2.0;
+
+        let player_adjusted_y = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x, self.screen_size.y).1;
+        let scroll_y: f32;
+        if player_adjusted_y * tile_size <= screen_y_half {
+            scroll_y = 0.0;
+        } else if (self.level.height() as f32 - player_adjusted_y) * tile_size <= screen_y_half {
+            scroll_y = self.level.height() as f32 * tile_size - self.screen_size.y;
+        } else {
+            scroll_y = player_adjusted_y * tile_size - screen_y_half;
+        }
+        Vector2::new(0.0, scroll_y)
+    }
 }
 
 impl EventHandler for MainState {
@@ -179,24 +217,45 @@ impl EventHandler for MainState {
                 _ => {}
             },
             GameState::InGame => {
-                self.player_vel.0 = 0.0;
+                let player_tile = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x, self.screen_size.y);
+
+                self.player_vel.x *= 0.85;
                 if keyboard::is_key_pressed(ctx, KeyCode::A) {
-                    self.player_vel.0 -= self.player_stats.speed as f32;
+                    self.player_vel.x -= self.player_stats.speed;
                 }
                 if keyboard::is_key_pressed(ctx, KeyCode::D) {
-                    self.player_vel.0 += self.player_stats.speed as f32;
+                    self.player_vel.x += self.player_stats.speed;
                 }
 
-                self.player_pos.0 += self.player_vel.0 / 8.0;
-                self.player_pos.1 += self.player_vel.1 / 8.0;
+                if self.player_vel.x > 0.0 { 
+                    self.player_facing = Facing::Right;
+                    if self.is_player_colliding(ctx, Direction::Right) {
+                        self.player_vel.x = 0.0;
+                    }
+                } else if self.player_vel.x < 0.0 { 
+                    self.player_facing = Facing::Left;
+                    if self.is_player_colliding(ctx, Direction::Left) {
+                        self.player_vel.x = 0.0;
+                    }
+                }
 
-                if self.player_vel.0 > 0.0 { 
-                    self.player_facing = Facing::Right 
-                } else if self.player_vel.0 < 0.0 { 
-                    self.player_facing = Facing::Left
+                let grounded = self.is_player_colliding(ctx, Direction::Down);
+                if !grounded { self.player_vel.y += 0.2; }
+
+                if self.player_vel.y > 0.0 && grounded || self.player_vel.y < 0.0 && self.is_player_colliding(ctx, Direction::Up) {
+                    self.player_vel.y = 0.0;
                 }
 
                 self.modify_player_health(ctx, -0.01);
+
+                if grounded && player_tile.1 % 1.0 > 0.51 {
+                    self.player_pos.y -= 0.01 * level::TILE_DIMS * 6.0;
+                }
+
+                self.player_pos.x += self.player_vel.x / 8.0;
+                self.player_pos.y += self.player_vel.y / 8.0;
+
+                println!("{:?}", player_tile);
             },
             _ => {}
         };
@@ -206,7 +265,7 @@ impl EventHandler for MainState {
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
         graphics::clear(ctx, graphics::BLACK);
         graphics::set_default_filter(ctx, graphics::FilterMode::Nearest);
-        let (max_width, max_height): (f32, f32) = (self.screen_size.0, self.screen_size.1);
+        let (max_width, max_height): (f32, f32) = (self.screen_size.x, self.screen_size.y);
         let time = (timer::duration_to_f64(timer::time_since_start(ctx)) * 1000.0) as f32;
         let text_scalef: f32 = 2.0;
 
@@ -242,6 +301,9 @@ impl EventHandler for MainState {
                 _ => {}
             },
             GameState::InGame => {
+                self.camera.scroll = 0.9 * self.camera.scroll + 0.1 * self.get_camera_scroll(ctx);
+                
+                // Level drawing
                 {
                     for i in 0..self.level.tiles.len() {
                         for n in 0..self.level.tiles[i].len() {
@@ -255,15 +317,17 @@ impl EventHandler for MainState {
                     }
                 }
 
+                // Player drawing
                 {
-                    let player_rect: Rect = if self.player_vel.0 != 0.0 { 
+                    let player_running = self.player_vel.x.abs() >= self.player_stats.speed * 0.2;
+                    let player_rect: Rect = if player_running { 
                         pick_frame_rect(ctx, Rect::new(0.0, 0.0, 26.0, 8.0), 3, 133.3, time) 
                     } else { 
                         Rect::new(0.0, 0.0, 8.0, 8.0)
                     };
-                    let player_bounce = if self.player_vel.0 != 0.0 { 6.0 } else { 1.0 };
+                    let player_bounce = if player_running { 6.0 } else { 1.0 };
                     let player = atlas_drawparam_base(ctx, player_rect)
-                        .dest(Point2::new(self.get_player_x(ctx), self.get_player_y(ctx)))
+                        .dest(Point2::new(self.get_player_x(ctx) + 18.0, self.get_player_y(ctx) + 24.0))
                         .scale(Vector2::new(
                             if self.player_facing == Facing::Left { -1.0 } else { 1.0 } * (5.9) + (2.0* PI*time/4000.0*player_bounce).sin() * 0.15, 
                             6.0 + (2.0 * PI * time / 4000.0 * player_bounce).cos() * 0.3))
@@ -271,9 +335,10 @@ impl EventHandler for MainState {
                     self.spritebatch.add(player);
                 }
 
+                // Interface drawing
                 {
                     let hp_bar = atlas_drawparam_base(ctx, Rect::new(48.0, 27.0, 46.0, 4.0))
-                        .dest(Point2::new(80.0, 12.0))
+                        .dest(Point2::new(80.0, 12.0 + self.camera.scroll.y))
                         .scale(Vector2::new(6.0, 6.0))
                         .offset(Point2::new(0.0, 0.0));
                     let hp_bar_frame = hp_bar.src(atlas_rect(ctx, Rect::new(48.0, 22.0, 46.0, 4.0)));
@@ -298,7 +363,7 @@ impl EventHandler for MainState {
             _ => {}
         };
 
-        graphics::draw(ctx, &self.spritebatch, graphics::DrawParam::new())?;
+        graphics::draw(ctx, &self.spritebatch, graphics::DrawParam::new().dest(Point2::new(0.0, -self.camera.scroll.y)))?;
         graphics::draw_queued_text(ctx, graphics::DrawParam::new()
             .dest(Point2::new(max_width/2.0, max_height/2.0))
             .scale(Vector2::new(text_scalef, text_scalef))
@@ -313,6 +378,7 @@ impl EventHandler for MainState {
         match keycode {
             KeyCode::A => { if self.is_in_game(ctx) { self.player_facing = Facing::Left; } },
             KeyCode::D => { if self.is_in_game(ctx) { self.player_facing = Facing::Right; } },
+            KeyCode::Space => { if self.is_in_game(ctx) && self.is_player_colliding(ctx, Direction::Down) { self.player_vel.y -= 20.0; } },
             _ => {}
         }
     }
@@ -368,13 +434,22 @@ struct GameStats {
     max_health: f32,
     attack: i32,
     defense: i32,
-    speed: i32,
+    speed: f32,
     tone: i32,
     accessories: [Option<Accessory>; 5]
 }
 
 #[derive(PartialEq)]
 enum Facing {
+    Left,
+    Right
+}
+
+// maybe redundant
+#[derive(PartialEq)]
+enum Direction {
+    Up,
+    Down,
     Left,
     Right
 }
@@ -395,4 +470,18 @@ enum Modifier {
     DefBoost,
     SpdBoost,
     TonBoost
+}
+
+struct CameraView {
+    scale: f32,
+    scroll: Vector2<f32>
+}
+
+impl CameraView {
+    pub fn new() -> Self {
+        CameraView {
+            scale: 1.0,
+            scroll: Vector2::new(0.0, 0.0)
+        }
+    }
 }

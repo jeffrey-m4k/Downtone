@@ -3,6 +3,8 @@ use std::io::Read;
 use ggez::{Context, GameResult};
 use ggez::graphics::{Rect, Color};
 use ggez::filesystem;
+use crate::MainState;
+
 
 pub const LEVEL_WIDTH: f32 = 16.0;
 
@@ -20,12 +22,91 @@ impl Level {
         for i in 0..vec_h {
             let mut temp_vec: Vec<LevelTile> = vec!();
             for n in 0..vec_w {
-                let mut level_tile = type_to_tile(ctx, data[i][n]);
-                level_tile.init_tile_texture(ctx, piece.clone(), i, n);
+                let level_tile = type_to_tile(ctx, data[i][n]);
                 temp_vec.push(level_tile);
             }
             self.tiles.push(temp_vec);
         }
+    }
+
+    pub fn get_tile(&self, _ctx: &mut Context, x: usize, y: usize) -> Option<LevelTile> {
+        if !(self.tiles.len() > y) || !(self.tiles[y].len() > x) { 
+            None 
+        } else {
+            Some(self.tiles[y][x])
+        }
+    }
+
+    pub fn comp_tile(&self, ctx: &mut Context, x: usize, y: usize, match_type: &TileType) -> bool {
+        let tile = self.get_tile(ctx, x, y);
+        match tile {
+            Some(t) => { &(t.tile_type) == match_type },
+            None => { false }
+        }
+    }
+
+    pub fn height(&self) -> usize {
+        self.tiles.len()
+    }
+
+    pub fn width(&self) -> usize {
+        if self.height() == 0 { 0 } else { self.tiles[0].len() }
+    }
+
+    pub fn init_textures(&mut self, ctx: &mut Context) {
+        for i in 0..self.height() {
+            for n in 0..self.width() {
+                self.init_tile_texture(ctx, i, n);
+            }
+        }
+    }
+
+    fn init_tile_texture(&mut self, ctx: &mut Context, x: usize, y: usize) {
+        let tile = self.tiles[x][y];
+        let x_max = self.height() as usize-1;
+        let y_max = self.width() as usize-1;
+
+        let atlas_region = TILE_REGIONS[tile.tile_type as usize];
+        assert!(atlas_region.w == 71.0 && atlas_region.h == 17.0, "Invalid atlas region for tile!");
+        let adjacent: [bool; 4] = [
+            if x>0 { self.comp_tile(ctx, y, x-1, &tile.tile_type) } else { true },
+            if y<y_max { self.comp_tile(ctx, y+1, x, &tile.tile_type) } else { true },
+            if x<x_max { self.comp_tile(ctx, y, x+1, &tile.tile_type) } else { true },
+            if y>0 { self.comp_tile(ctx, y-1, x, &tile.tile_type) } else { true },
+        ];
+        let tex_id = if adjacent[0] {
+            if adjacent[1] {
+                if adjacent[2] {
+                    if adjacent[3] { 8 } // 0,1,2,3
+                    else { 3 } // 0,1,2
+                } 
+                else if adjacent[3] { 11 } // 0,1,3
+                else { 9 } // 0,1
+            } 
+            else if adjacent[2] {
+                if adjacent[3] { 12 } // 0,2,3
+                else { 5 } // 0,2
+            }
+            else if adjacent[3] { 10 } // 0,3
+            else { 14 } // 0
+        }
+        else if adjacent[1] { 
+            if adjacent[2] {
+                if adjacent[3] { 4 } // 1,2,3
+                else { 1 } // 1,2
+            }
+            else if adjacent[3] { 13 } // 1,3
+            else { 6 } // 1
+        }
+        else if adjacent[2] {
+            if adjacent[3] { 2 } // 2,3
+            else { 7 } // 2
+        } 
+        else if adjacent[3] { 15 } // 3
+        else { 0 }; // none
+        //println!("({:?}, {:?}): {:?} | {:?}", x, y, tex_id, adjacent);
+        let tex = get_tile_texture_rect(ctx, atlas_region, tex_id);
+        self.tiles[x][y].tile_texture = Some(tex);
     }
 }
 
@@ -95,52 +176,6 @@ pub struct LevelTile {
     pub collide: bool
 }
 
-impl LevelTile {
-    pub fn init_tile_texture(&mut self, ctx: &mut Context, piece: LevelPiece, x: usize, y: usize) {
-        let atlas_region = TILE_REGIONS[self.tile_type as usize];
-        assert!(atlas_region.w == 71.0 && atlas_region.h == 17.0, "Invalid atlas region for tile!");
-        let adjacent: [bool; 4] = [
-            if x>0 { comp_tile(ctx, &piece, y, x-1, &self.tile_type) } else { true },
-            if y<LEVEL_WIDTH as usize-1 { comp_tile(ctx, &piece, y+1, x, &self.tile_type) } else { true },
-            if x<LEVEL_WIDTH as usize-1 { comp_tile(ctx, &piece, y, x+1, &self.tile_type) } else { true },
-            if y>0 { comp_tile(ctx, &piece, y-1, x, &self.tile_type) } else { true },
-        ];
-        let tex_id = if adjacent[0] {
-            if adjacent[1] {
-                if adjacent[2] {
-                    if adjacent[3] { 8 } // 0,1,2,3
-                    else { 3 } // 0,1,2
-                } 
-                else if adjacent[3] { 11 } // 0,1,3
-                else { 9 } // 0,1
-            } 
-            else if adjacent[2] {
-                if adjacent[3] { 12 } // 0,2,3
-                else { 5 } // 0,2
-            }
-            else if adjacent[3] { 10 } // 0,3
-            else { 14 } // 0
-        }
-        else if adjacent[1] { 
-            if adjacent[2] {
-                if adjacent[3] { 4 } // 1,2,3
-                else { 1 } // 1,2
-            }
-            else if adjacent[3] { 13 } // 1,3
-            else { 6 } // 1
-        }
-        else if adjacent[2] {
-            if adjacent[3] { 2 } // 2,3
-            else { 7 } // 2
-        } 
-        else if adjacent[3] { 15 } // 3
-        else { 0 }; // none
-        //println!("({:?}, {:?}): {:?} | {:?}", x, y, tex_id, adjacent);
-        let tex = get_tile_texture_rect(ctx, atlas_region, tex_id);
-        self.tile_texture = Some(tex);
-    }
-}
-
 pub struct Generator {
     pub pieces: Vec<LevelPiece>,
     pub colors: [Color; 4]
@@ -155,22 +190,8 @@ pub fn get_tile_texture_rect(_ctx: &mut Context, region: Rect, index: usize) -> 
     Rect::new(region.x + (TILE_DIMS + 1.0) * col, region.y + (TILE_DIMS + 1.0) * row, TILE_DIMS, TILE_DIMS)
 }
 
-pub fn get_tile(_ctx: &mut Context, piece: &LevelPiece, x: usize, y: usize) -> Option<TileType> {
-    let piece_h = piece.data.len();
-    if piece_h == 0 { return None } // <-- this looks like an eye
-    let piece_w = piece.data[0].len();
-    if piece_w == 0 { return None }
-    if x >= piece_w || y >= piece_h { return None }
-
-    Some(piece.data[y][x])
-}
-
-pub fn comp_tile(ctx: &mut Context, piece: &LevelPiece, x: usize, y: usize, match_type: &TileType) -> bool {
-    let tile = get_tile(ctx, piece, x, y);
-    match tile {
-        Some(t_type) => { &t_type == match_type },
-        None => { false }
-    }
+pub fn get_tile_drawn_size(_ctx: &mut Context, scale: f32) -> f32 {
+    TILE_DIMS * 6.0 / scale
 }
 
 #[derive(PartialEq, Copy, Clone, Debug)]
