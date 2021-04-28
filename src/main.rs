@@ -56,7 +56,8 @@ struct MainState {
     player_pos: (f32, f32),
     player_vel: (f32, f32),
     player_facing: Facing,
-    generator: level::Generator
+    generator: level::Generator,
+    level: level::Level
 }
 
 impl MainState {
@@ -90,6 +91,15 @@ impl MainState {
             accessories: [None; 5]
         };
 
+        let piece = level::piece_from_dntp(ctx, "/piece/0.dntp").unwrap();
+        let generator = level::Generator {
+            pieces: vec!(piece.clone())
+        };
+        let mut level = level::Level {
+            tiles: vec!()
+        };
+        level.push_piece(ctx, &piece);
+
         let state = MainState {
             state: GameState::Menu(MenuState::Main),
             //state: GameState::InGame,
@@ -102,11 +112,10 @@ impl MainState {
             player_pos: (100.0, 300.0),
             player_vel: (0.0, 0.0),
             player_facing: Facing::Right,
-            generator: level::Generator {
-                pieces: vec!(level::piece_from_dntp(ctx, "/piece/0.dntp").unwrap())
-            }
+            generator: generator,
+            level: level
         };
-        println!("{:?}", state.generator.pieces[0].data);
+
         Ok(state)
     }
 
@@ -208,6 +217,18 @@ impl EventHandler for MainState {
                 _ => {}
             },
             GameState::InGame => {
+                {
+                    for i in 0..self.level.tiles.len() {
+                        for n in 0..self.level.tiles[i].len() {
+                            //println!("self.level.tiles[{:?}][{:?}].tile_texture.unwrap()", i, n);
+                            let tile = atlas_drawparam_base(ctx, self.level.tiles[i][n].tile_texture.unwrap())
+                                .dest(nalgebra::Point2::new(level::TILE_DIMS * 6.0 * n as f32, level::TILE_DIMS * 6.0 * i as f32))
+                                .scale(nalgebra::Vector2::new(6.0, 6.0));
+                            self.spritebatch.add(tile);
+                        }
+                    }
+                }
+
                 {
                     let player_rect: Rect = if self.player_vel.0 != 0.0 { 
                         pick_frame_rect(ctx, Rect::new(0.0, 0.0, 26.0, 8.0), 3, 133.3, time) 
