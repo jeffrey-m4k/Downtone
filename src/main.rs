@@ -6,7 +6,7 @@ use std::f32::consts::PI;
 use ggez::{Context, ContextBuilder, GameResult};
 use ggez::event::{self, EventHandler, KeyCode, KeyMods};
 use ggez::graphics;
-use ggez::graphics::{Text, TextFragment, Rect};
+use ggez::graphics::{Text, TextFragment, Rect, Scale, DEFAULT_FONT_SCALE};
 use ggez::nalgebra;
 use ggez::timer;
 use ggez::audio;
@@ -51,7 +51,7 @@ struct MainState {
     spritebatch: graphics::spritebatch::SpriteBatch,
     music_source: audio::Source,
     font: graphics::Font,
-    text_common: [Text; 3],
+    text_common: [Text; 4],
     player_stats: GameStats,
     player_pos: (f32, f32),
     player_vel: (f32, f32),
@@ -68,17 +68,20 @@ impl MainState {
         music.set_repeat(true);
 
         let font_emulogic =  graphics::Font::new(ctx, "/font/emulogic.ttf").expect("Could not load font!");
-        let text_common: [_; 3] = [
+        
+        graphics::set_default_filter(ctx, graphics::FilterMode::Nearest);
+        let text_common: [_; 4] = [
             Text::new(TextFragment::new("PRESS ENTER").font(font_emulogic)),
-            Text::new(TextFragment::new("a game for the 2020-21 APCSP create task")),
-            Text::new(TextFragment::new("HEALTH").font(font_emulogic))
+            Text::new(TextFragment::new("a game for the 2020-21 APCSP create task").scale(Scale::uniform(0.75 * DEFAULT_FONT_SCALE))),
+            Text::new(TextFragment::new("HP").font(font_emulogic)),
+            Text::new(TextFragment::new("100").font(font_emulogic))
         ];
 
         let stats = GameStats {
             floor: 0,
             score: 0,
-            health: 100,
-            max_health: 100,
+            health: 100.0,
+            max_health: 100.0,
             attack: 10,
             defense: 5,
             speed: 10,
@@ -95,7 +98,7 @@ impl MainState {
             font: font_emulogic,
             text_common: text_common,
             player_stats: stats,
-            player_pos: (100.0, 100.0),
+            player_pos: (100.0, 300.0),
             player_vel: (0.0, 0.0),
             player_facing: Facing::Right
         };
@@ -111,6 +114,12 @@ impl MainState {
     fn get_player_y(&self, _ctx: &mut Context) -> f32 { self.player_pos.1 }
 
     fn is_in_game(&self, _ctx: &mut Context) -> bool { self.state == GameState::InGame }
+
+    fn modify_player_health(&mut self, ctx: &mut Context, num: f32) {
+        assert!(self.is_in_game(ctx), "Tried to modify player health while not in game!");
+        self.player_stats.health = clamp(self.player_stats.health + num, 0.0, self.player_stats.max_health);
+        self.text_common[3] = Text::new(TextFragment::new(format!("{}", self.player_stats.health as i32)).font(self.font));
+    }
 }
 
 impl EventHandler for MainState {
@@ -147,6 +156,8 @@ impl EventHandler for MainState {
                 } else if self.player_vel.0 < 0.0 { 
                     self.player_facing = Facing::Left
                 }
+
+                self.modify_player_health(ctx, -0.01);
             },
             _ => {}
         };
@@ -155,9 +166,10 @@ impl EventHandler for MainState {
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
         graphics::clear(ctx, graphics::BLACK);
+        graphics::set_default_filter(ctx, graphics::FilterMode::Nearest);
         let (max_width, max_height): (f32, f32) = graphics::drawable_size(ctx);
         let time = (timer::duration_to_f64(timer::time_since_start(ctx)) * 1000.0) as f32;
-        let text_scalef: f32 = 1.5;
+        let text_scalef: f32 = 2.0;
 
         match &self.state {
             GameState::Menu(state) => match state {
@@ -179,44 +191,48 @@ impl EventHandler for MainState {
                             .offset(nalgebra::Point2::new(0.5, 1.0));
                         graphics::draw(ctx, &bgr, bgr_param)?;
                     }
+                    
+                    let text_width = self.text_common[1].width(ctx);
+                    graphics::queue_text(ctx, &self.text_common[1], nalgebra::Point2::new(-(text_width as f32)/2.0, (max_height/2.0 - 80.0)/text_scalef), None);
 
                     if (time + 300.0) % 1263.0 > 631.5 {
                         let text_width = self.text_common[0].width(ctx);
                         graphics::queue_text(ctx, &self.text_common[0], nalgebra::Point2::new(-(text_width as f32) / 2.0, 35.0/* + (2.0 * PI * time / cycle_time / 2.0).sin() * 2.0*/), None);
-                        graphics::draw_queued_text(ctx, graphics::DrawParam::new()
-                            .dest(nalgebra::Point2::new(max_width/2.0, max_height/2.0))
-                            .scale(nalgebra::Vector2::new(2.0, 2.0))
-                            .offset(nalgebra::Point2::new(0.5, 0.5)), 
-                            None, graphics::FilterMode::Nearest).expect("Failed to draw text!");
                     }
-                    
-                    let text_width = self.text_common[1].width(ctx);
-                    graphics::queue_text(ctx, &self.text_common[1], nalgebra::Point2::new(-(text_width as f32)/2.0, (max_height/2.0 - 80.0)/text_scalef), None);
                 },
                 _ => {}
             },
             GameState::InGame => {
                 {
                     let player_rect: Rect = if self.player_vel.0 != 0.0 { 
-                        pick_frame_rect(ctx, Rect::new(0.0, 0.0, 26.0, 8.0), 3, 250.0, time) 
+                        pick_frame_rect(ctx, Rect::new(0.0, 0.0, 26.0, 8.0), 3, 133.3, time) 
                     } else { 
                         Rect::new(0.0, 0.0, 8.0, 8.0)
                     };
+                    let player_bounce = if self.player_vel.0 != 0.0 { 8.0 } else { 1.0 };
                     let player = atlas_drawparam_base(ctx, player_rect)
                         .dest(nalgebra::Point2::new(self.get_player_x(ctx), self.get_player_y(ctx)))
-                        .scale(nalgebra::Vector2::new(if self.player_facing == Facing::Left { -8.0 } else { 8.0 }, 8.0))
-                        .offset(nalgebra::Point2::new(0.5, 0.5));
+                        .scale(nalgebra::Vector2::new(
+                            if self.player_facing == Facing::Left { -1.0 } else { 1.0 } * (7.9) + (2.0 * PI * time / 4000.0 * player_bounce).sin() * 0.15, 
+                            8.0 + (2.0 * PI * time / 4000.0 * player_bounce).cos() * 0.3))
+                        .offset(nalgebra::Point2::new(0.5, 1.0));
                     self.spritebatch.add(player);
                 }
 
                 {
-                    let hp_bar = atlas_drawparam_base(ctx, Rect::new(48.0, 29.0, 49.0, 6.0))
-                        .dest(nalgebra::Point2::new(max_width - 8.0, 8.0))
+                    let hp_bar = atlas_drawparam_base(ctx, Rect::new(48.0, 27.0, 46.0, 4.0))
+                        .dest(nalgebra::Point2::new(80.0, 8.0))
                         .scale(nalgebra::Vector2::new(8.0, 8.0))
-                        .offset(nalgebra::Point2::new(1.0, 0.0));
-                    let hp_bar_frame = hp_bar.src(atlas_rect(ctx, Rect::new(48.0, 22.0, 49.0, 6.0)));
-                    self.spritebatch.add(hp_bar);
+                        .offset(nalgebra::Point2::new(0.0, 0.0));
+                    let hp_bar_frame = hp_bar.src(atlas_rect(ctx, Rect::new(48.0, 22.0, 46.0, 4.0)));
+                    
+                    let hp_prog: f32 = self.player_stats.health / self.player_stats.max_health;
+
+                    self.spritebatch.add(hp_bar.scale(nalgebra::Vector2::new(hp_prog * 8.0, 8.0)));
                     self.spritebatch.add(hp_bar_frame);
+                    
+                    graphics::queue_text(ctx, &self.text_common[2], nalgebra::Point2::new(8.0 - max_width/2.0/text_scalef, 4.0 - max_height/2.0/text_scalef), None);
+                    graphics::queue_text(ctx, &self.text_common[3], nalgebra::Point2::new(232.0 - max_width/2.0/text_scalef, 4.0 - max_height/2.0/text_scalef), None);
                 }
             },
             _ => {}
@@ -272,11 +288,24 @@ fn pick_frame_rect(_ctx: &mut Context, frame_rect: Rect, frames: usize, interval
     rect
 }
 
+/// Clamps input value between min and max
+fn clamp<T>(input: T, min: T, max: T) -> T 
+where T: PartialOrd<T> {
+    assert!(max > min);
+    if input < min { 
+        min
+    } else if input > max {
+        max
+    } else {
+        input
+    }
+}
+
 struct GameStats {
     floor: u32,
     score: i32,
-    health: i32,
-    max_health: i32,
+    health: f32,
+    max_health: f32,
     attack: i32,
     defense: i32,
     speed: i32,
