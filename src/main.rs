@@ -12,6 +12,7 @@ use ggez::timer;
 use ggez::audio;
 use ggez::audio::SoundSource;
 use ggez::input::keyboard;
+use ggez::conf::WindowMode;
 use fastrand;
 
 mod level;
@@ -29,6 +30,7 @@ pub fn main() -> GameResult {
     let (ctx, event_loop) = &mut cb.build()?;
     graphics::set_default_filter(ctx, graphics::FilterMode::Nearest);
     graphics::set_window_title(ctx, "Downtone");
+    graphics::set_mode(ctx, WindowMode::default().resizable(true))?;
     let state = &mut MainState::new(ctx)?;
     event::run(ctx, event_loop, state)
 }
@@ -57,6 +59,7 @@ pub struct MainState {
     player_pos: Vector2<f32>,
     player_vel: Vector2<f32>,
     player_facing: Facing,
+    player_jump_time: u32,
     generator: level::Generator,
     level: level::Level,
     screen_size: Vector2<f32>,
@@ -65,6 +68,7 @@ pub struct MainState {
 
 impl MainState {
     fn new(ctx: &mut Context) -> GameResult<MainState> {
+
         let mut atlas: graphics::Image = graphics::Image::new(ctx, "/atlas.png").expect("Could not load texture atlas!");
         atlas.set_filter(graphics::FilterMode::Nearest);
         let batch = graphics::spritebatch::SpriteBatch::new(atlas.clone());
@@ -99,9 +103,9 @@ impl MainState {
             pieces: vec!(piece.clone()),
             colors: [
                 Color::from_rgb(77, 83, 102),
-                Color::from_rgb(77, 102, 83),
-                Color::from_rgb(102, 77, 83),
-                Color::from_rgb(102, 83, 77)
+                Color::from_rgb(41, 59, 42), //77,102,83
+                Color::from_rgb(92, 49, 59), //102,77,83
+                Color::from_rgb(99, 40, 40)  //102,83,77
             ]
         };
         let mut level = level::Level {
@@ -129,6 +133,7 @@ impl MainState {
             player_pos: Vector2::new(150.0, 150.0),
             player_vel: Vector2::new(0.0, 0.0),
             player_facing: Facing::Right,
+            player_jump_time: 40,
             generator: generator,
             level: level,
             screen_size: Vector2::new(drawable_size.0, drawable_size.1),
@@ -216,6 +221,8 @@ impl MainState {
     }
 }
 
+const MAX_FALL_SPEED: f32 = 60.0;
+
 impl EventHandler for MainState {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
         match &self.state {
@@ -235,13 +242,15 @@ impl EventHandler for MainState {
             },
             GameState::InGame => {
                 let player_tile = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x, self.screen_size.y);
+                let grounded = self.is_player_colliding(ctx, Direction::Down);
+                let x_speed_mult = if grounded { 1.0 } else { 1.25 };
 
                 self.player_vel.x *= 0.85;
                 if keyboard::is_key_pressed(ctx, KeyCode::A) {
-                    self.player_vel.x -= self.player_stats.speed;
+                    self.player_vel.x -= self.player_stats.speed * x_speed_mult;
                 }
                 if keyboard::is_key_pressed(ctx, KeyCode::D) {
-                    self.player_vel.x += self.player_stats.speed;
+                    self.player_vel.x += self.player_stats.speed * x_speed_mult;
                 }
 
                 if self.player_vel.x > 0.0 { 
@@ -256,18 +265,36 @@ impl EventHandler for MainState {
                     }
                 }
 
-                let grounded = self.is_player_colliding(ctx, Direction::Down);
-                if !grounded { self.player_vel.y += 0.2; }
+                if keyboard::is_key_pressed(ctx, KeyCode::Space) && self.player_jump_time > 0 {
+                    if self.player_jump_time == 40 {
+                        self.player_vel.y -= 30.0;
+                    }
+                    self.player_jump_time -= 1;
+                }
+
+                if !grounded { 
+                    if !keyboard::is_key_pressed(ctx, KeyCode::Space) || self.player_jump_time == 0 {
+                        self.player_jump_time = 0;
+                        if self.player_vel.y < MAX_FALL_SPEED {
+                            self.player_vel.y += 0.7; 
+                        } else {
+                            self.player_vel.y = MAX_FALL_SPEED;
+                        }
+                    }
+                } else {
+                    if !keyboard::is_key_pressed(ctx, KeyCode::Space) {
+                        self.player_jump_time = 40;
+                    }
+                    if player_tile.1 % 1.0 > 0.51 {
+                        self.player_pos.y -= 0.01 * level::TILE_DIMS * 6.0;
+                    }
+                }
 
                 if self.player_vel.y > 0.0 && grounded || self.player_vel.y < 0.0 && self.is_player_colliding(ctx, Direction::Up) {
                     self.player_vel.y = 0.0;
                 }
 
-                self.modify_player_health(ctx, -0.01);
-
-                if grounded && player_tile.1 % 1.0 > 0.51 {
-                    self.player_pos.y -= 0.01 * level::TILE_DIMS * 6.0;
-                }
+                //self.modify_player_health(ctx, -0.01);
 
                 self.player_pos.x += self.player_vel.x / 8.0;
                 self.player_pos.y += self.player_vel.y / 8.0;
@@ -360,8 +387,8 @@ impl EventHandler for MainState {
                         .offset(Point2::new(0.0, 0.0));
                     let hp_bar_frame = hp_bar.src(atlas_rect(ctx, Rect::new(48.0, 22.0, 46.0, 4.0)));
 
-                    let hp_bar_shadow = graphics::DrawParam::color(hp_bar.dest(Point2::new(80.0, 15.0)), Color::from_rgb(0,0,0));
-                    let hp_bar_frame_shadow = graphics::DrawParam::color(hp_bar_frame.dest(Point2::new(80.0, 15.0)), Color::from_rgb(0,0,0));
+                    let hp_bar_shadow = graphics::DrawParam::color(hp_bar.dest(Point2::new(80.0, 15.0 + self.camera.scroll.y)), Color::from_rgb(0,0,0));
+                    let hp_bar_frame_shadow = graphics::DrawParam::color(hp_bar_frame.dest(Point2::new(80.0, 15.0 + self.camera.scroll.y)), Color::from_rgb(0,0,0));
                     
                     let hp_prog: f32 = self.player_stats.health / self.player_stats.max_health;
 
@@ -395,7 +422,6 @@ impl EventHandler for MainState {
         match keycode {
             KeyCode::A => { if self.is_in_game(ctx) { self.player_facing = Facing::Left; } },
             KeyCode::D => { if self.is_in_game(ctx) { self.player_facing = Facing::Right; } },
-            KeyCode::Space => { if self.is_in_game(ctx) && self.is_player_colliding(ctx, Direction::Down) { self.player_vel.y -= 20.0; } },
             _ => {}
         }
     }
