@@ -169,16 +169,33 @@ impl MainState {
             _ => lvl_pos.1 as usize
         };
         let test_tile = self.level.get_tile(ctx, test_x, test_y);
-        let test_tile_b: Option<level::LevelTile>;
-        match test_tile {
-            Some(tile) => tile.collide && match dir {
-                Direction::Left => lvl_pos.0 % 1.0 < 0.5,
-                Direction::Right => lvl_pos.0 % 1.0 > 0.5,
-                Direction::Up => lvl_pos.1 % 1.0 < 0.5,
-                Direction::Down => lvl_pos.1 % 1.0 > 0.5
+        
+        let x_offset = lvl_pos.0 % 1.0;
+        let y_offset = lvl_pos.1 % 1.0;
+
+        let test_tile_b: Option<level::LevelTile> = match dir {
+            Direction::Up | Direction::Down => match x_offset {
+                z if z > 0.70 => self.level.get_tile(ctx, test_x+1, test_y),
+                z if z < 0.30 => self.level.get_tile(ctx, test_x-1, test_y),
+                _ => None
             },
+            Direction::Left | Direction::Right => match y_offset {
+                z if z > 0.58 => self.level.get_tile(ctx, test_x, test_y+1),
+                z if z < 0.42 => self.level.get_tile(ctx, test_x, test_y-1),
+                _ => None
+            }
+        };
+        (match (test_tile, test_tile_b) {
+            (Some(tile_a), Some(tile_b)) => tile_a.collide || tile_b.collide,
+            (Some(tile_a), None) => tile_a.collide,
+            (None, Some(tile_b)) => tile_b.collide,
             _ => false
-        }
+        } && match dir {
+            Direction::Left => x_offset < 0.5,
+            Direction::Right => x_offset > 0.5,
+            Direction::Up => y_offset < 0.5,
+            Direction::Down => y_offset > 0.5
+        })
     }
 
     fn get_camera_scroll(&self, ctx: &mut Context) -> Vector2<f32> {
