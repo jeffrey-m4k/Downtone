@@ -1,15 +1,19 @@
 use std::path;
 use std::io::Read;
+use std::f32::{consts::PI};
 use ggez::{Context, GameResult};
 use ggez::graphics::{Rect, Color};
 use ggez::filesystem;
-use crate::MainState;
+use ggez::nalgebra::Vector2;
+use crate::{CameraView, MainState, clamp};
 
 
 pub const LEVEL_WIDTH: f32 = 16.0;
 
 pub struct Level {
     pub tiles: Vec<Vec<LevelTile>>,
+    pub lightmap: Vec<Vec<u8>>,
+    pub last_update: f32,
     pub color: Color
 }
 
@@ -25,7 +29,9 @@ impl Level {
                 let level_tile = type_to_tile(ctx, data[i][n]);
                 temp_vec.push(level_tile);
             }
+            let size = temp_vec.len();
             self.tiles.push(temp_vec);
+            self.lightmap.push(vec![15; size]);
         }
     }
 
@@ -104,16 +110,72 @@ impl Level {
         } 
         else if adjacent[3] { 15 } // 3
         else { 0 }; // none
-        //println!("({:?}, {:?}): {:?} | {:?}", x, y, tex_id, adjacent);
         let tex = get_tile_texture_rect(ctx, atlas_region, tex_id);
         self.tiles[x][y].tile_texture = Some(tex);
     }
+
+    pub fn update_lightmap(&mut self, ctx: &mut Context, camera: &CameraView, screen_size: Vector2<f32>, player_pos: Vector2<f32>) {
+        let screen_y_tiles = screen_to_lvl_y(ctx, screen_size.y);
+        let y_min = clamp(screen_to_lvl_y(ctx, camera.scroll.y) as i8 - screen_y_tiles as i8, 0, self.height() as i8 - 1) as usize;
+        let y_max = clamp(y_min + 3 * screen_y_tiles as usize, y_min, self.height() - 1);
+        let player_pos = screen_to_lvl_coords(ctx, player_pos.x, player_pos.y, screen_size.x);
+
+        for i in 0..self.width() {
+            for n in y_min..=y_max {
+                self.update_light(ctx, i, n, player_pos);
+            }
+        }
+    }
+
+    fn update_light(&mut self, _ctx: &mut Context, x: usize, y: usize, player_pos: Vector2<f32>) {
+
+        let mut light = 60i8;
+
+        //let target_x = player_pos.x as usize;
+        //let target_y = player_pos.y as usize;
+        
+        let dist = ((player_pos.y - y as f32).powf(2.0) + (player_pos.x - x as f32).powf(2.0)).sqrt() * 8.0;
+        light = clamp(light - dist as i8, 12, 60);
+        self.lightmap[y][x] = light as u8;
+
+        // 👇👇👇 too hard :( 
+        /*let mut cur_x = x as f32;
+        let mut cur_y = y as f32;
+        while (cur_x != target_x || cur_y != target_y) && light > 3 {
+            //let dist = ((target_y - cur_y as usize).pow(2) as f32 + (target_x - cur_x).pow(2) as f32).sqrt();
+            let angle = fit_angle(cur_y.atan2(cur_x) - target_y.atan2(target_x));
+            println!("Tracing tile: ({}, {}) | Angle: {}", cur_x, cur_y, angle / (2.0 * PI) * 360.0);
+            match angle {
+                a if a >= PI/4.0 && a <= PI*3.0/4.0 => { cur_y -= 1.0; },
+                a if a >= PI*3.0/4.0 && a <= PI*5.0/4.0 => { cur_x -= 1.0; },
+                a if a >= PI*5.0/4.0 && a <= PI*7.0/4.0 => { cur_y += 1.0; },
+                _ => { cur_x += 1.0 }
+            }
+            light -= 1;
+            if self.get_tile(ctx, cur_x as usize, cur_y as usize).unwrap().collide {
+                light = 0;
+            }
+        }
+        self.lightmap[y][x] = light;*/
+    }
 }
 
-pub fn screen_to_lvl_coords(_ctx: &mut Context, x: f32, y: f32, screen_w: f32, _screen_h: f32) -> (f32, f32) {
-    let _x_cap = TILE_DIMS * 6.0 / screen_w;
+pub fn screen_to_lvl_coords(ctx: &mut Context, x: f32, y: f32, screen_w: f32) -> Vector2<f32> {
     let x_offset = 6.0 * (screen_w / 6.0 / TILE_DIMS - LEVEL_WIDTH) / 2.0;
-    ((x + x_offset) / TILE_DIMS / 6.0, y / TILE_DIMS / 6.0)
+    Vector2::new((x + x_offset) / TILE_DIMS / 6.0, screen_to_lvl_y(ctx, y))
+}
+
+fn screen_to_lvl_y(_ctx: &mut Context, y: f32) -> f32 {
+    y / TILE_DIMS / 6.0
+}
+
+fn fit_angle(theta: f32) -> f32 {
+    let theta = theta % (2.0 * PI);
+    if theta < 0.0 {
+        2.0 * PI + theta
+    } else {
+        theta
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -128,12 +190,8 @@ impl LevelPiece {
     }
 }
 
-pub fn piece_from_dntp<P: AsRef<path::Path>>(ctx: &mut Context, path: P) -> GameResult<LevelPiece> {
-    let mut dntp = String::new();
-    let mut f = filesystem::open(ctx, path)?;
-    f.read_to_string(&mut dntp)?;
-
-    let mut rows = dntp.split('~');
+pub fn piece_from_string(string: String) -> GameResult<LevelPiece> {
+    let mut rows = string.split('~');
 
     let mut data: Vec<Vec<TileType>> = vec!();
     let mut row_index: usize = 0;
@@ -167,6 +225,14 @@ pub fn piece_from_dntp<P: AsRef<path::Path>>(ctx: &mut Context, path: P) -> Game
     Ok(LevelPiece {
         data: data
     })
+}
+
+pub fn piece_from_dntp<P: AsRef<path::Path>>(ctx: &mut Context, path: P) -> GameResult<LevelPiece> {
+    let mut dntp = String::new();
+    let mut f = filesystem::open(ctx, path)?;
+    f.read_to_string(&mut dntp)?;
+
+    piece_from_string(dntp)
 }
 
 #[derive(Copy, Clone, Debug)]

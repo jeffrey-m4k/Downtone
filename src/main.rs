@@ -98,9 +98,10 @@ impl MainState {
             accessories: [None; 5]
         };
 
-        let piece = level::piece_from_dntp(ctx, "/piece/0.dntp").unwrap();
+        let pieceA = level::piece_from_dntp(ctx, "/piece/_spawn-0.dntp").unwrap();
+        let pieceB = level::piece_from_dntp(ctx, "/piece/0.dntp").unwrap();
         let generator = level::Generator {
-            pieces: vec!(piece.clone()),
+            pieces: vec!(pieceA.clone(), pieceB.clone()),
             colors: [
                 Color::from_rgb(77, 83, 102),
                 Color::from_rgb(41, 59, 42), //77,102,83
@@ -110,27 +111,31 @@ impl MainState {
         };
         let mut level = level::Level {
             tiles: vec!(),
+            lightmap: vec!(),
+            last_update: 0.0,
             color: {
                 let colors = generator.colors;
                 let i = fastrand::usize(..colors.len());
                 colors[i]
             }
         };
-        level.push_piece(ctx, &piece);
+        level.push_piece(ctx, &level::piece_from_string(String::from("0:16")).unwrap());
+        level.push_piece(ctx, &pieceA);
+        level.push_piece(ctx, &pieceB);
+        level.push_piece(ctx, &level::piece_from_string(String::from("0:16")).unwrap());
         level.init_textures(ctx);
 
         let drawable_size = graphics::drawable_size(ctx);
 
-        let state = MainState {
+        let mut state = MainState {
             state: GameState::Menu(MenuState::Main),
-            //state: GameState::InGame,
             paused: false,
             spritebatch: batch,
             music_source: music,
             font: font_emulogic,
             text_common: text_common,
             player_stats: stats,
-            player_pos: Vector2::new(150.0, 150.0),
+            player_pos: Vector2::new(level::TILE_DIMS * 6.0 * 8.0, 150.0),
             player_vel: Vector2::new(0.0, 0.0),
             player_facing: Facing::Right,
             player_jump_time: 40,
@@ -139,6 +144,7 @@ impl MainState {
             screen_size: Vector2::new(drawable_size.0, drawable_size.1),
             camera: CameraView::new()
         };
+        state.level.update_lightmap(ctx, &state.camera, state.screen_size, state.player_pos);
 
         Ok(state)
     }
@@ -161,22 +167,22 @@ impl MainState {
 
     fn is_player_colliding(&self, ctx: &mut Context, dir: Direction) -> bool {
         assert!(self.is_in_game(ctx), "Tried to check player state while not in game!");
-        let lvl_pos = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x, self.screen_size.y);
+        let lvl_pos = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x);
 
         let test_x = match dir {
-            Direction::Left => lvl_pos.0 as usize-1,
-            Direction::Right => lvl_pos.0 as usize+1,
-            _ => lvl_pos.0 as usize
+            Direction::Left => lvl_pos.x as usize-1,
+            Direction::Right => lvl_pos.x as usize+1,
+            _ => lvl_pos.x as usize
         };
         let test_y = match dir {
-            Direction::Up => lvl_pos.1 as usize-1,
-            Direction::Down => lvl_pos.1 as usize+1,
-            _ => lvl_pos.1 as usize
+            Direction::Up => lvl_pos.y as usize-1,
+            Direction::Down => lvl_pos.y as usize+1,
+            _ => lvl_pos.y as usize
         };
         let test_tile = self.level.get_tile(ctx, test_x, test_y);
         
-        let x_offset = lvl_pos.0 % 1.0;
-        let y_offset = lvl_pos.1 % 1.0;
+        let x_offset = lvl_pos.x % 1.0;
+        let y_offset = lvl_pos.y % 1.0;
 
         let test_tile_b: Option<level::LevelTile> = match dir {
             Direction::Up | Direction::Down => match x_offset {
@@ -208,7 +214,7 @@ impl MainState {
         let tile_size = level::get_tile_drawn_size(ctx, self.camera.scale);
         let screen_y_half = self.screen_size.y / 2.0;
 
-        let player_adjusted_y = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x, self.screen_size.y).1;
+        let player_adjusted_y = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x).y;
         let scroll_y: f32;
         if player_adjusted_y * tile_size <= screen_y_half {
             scroll_y = 0.0;
@@ -241,7 +247,7 @@ impl EventHandler for MainState {
                 _ => {}
             },
             GameState::InGame => {
-                let player_tile = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x, self.screen_size.y);
+                let player_tile = level::screen_to_lvl_coords(ctx, self.player_pos.x, self.player_pos.y, self.screen_size.x);
                 let grounded = self.is_player_colliding(ctx, Direction::Down);
                 let x_speed_mult = if grounded { 1.0 } else { 1.25 };
 
@@ -285,7 +291,7 @@ impl EventHandler for MainState {
                     if !keyboard::is_key_pressed(ctx, KeyCode::Space) {
                         self.player_jump_time = 40;
                     }
-                    if player_tile.1 % 1.0 > 0.51 {
+                    if player_tile.y % 1.0 > 0.51 {
                         self.player_pos.y -= 0.01 * level::TILE_DIMS * 6.0;
                     }
                 }
@@ -294,12 +300,10 @@ impl EventHandler for MainState {
                     self.player_vel.y = 0.0;
                 }
 
-                //self.modify_player_health(ctx, -0.01);
-
                 self.player_pos.x += self.player_vel.x / 8.0;
                 self.player_pos.y += self.player_vel.y / 8.0;
 
-                println!("{:?}", player_tile);
+                //println!("{:?}", player_tile);
             },
             _ => {}
         };
@@ -345,17 +349,25 @@ impl EventHandler for MainState {
                 _ => {}
             },
             GameState::InGame => {
-                self.camera.scroll = 0.9 * self.camera.scroll + 0.1 * self.get_camera_scroll(ctx);
+                self.camera.scroll = self.camera.inertia * self.camera.scroll + (1.0 - self.camera.inertia) * self.get_camera_scroll(ctx);
+                if time - self.level.last_update > 50.0 {
+                    self.level.update_lightmap(ctx, &self.camera, self.screen_size, self.player_pos);
+                    self.level.last_update = time;
+                }
                 
                 // Level drawing
                 {
-                    for i in 0..self.level.tiles.len() {
-                        for n in 0..self.level.tiles[i].len() {
-                            //println!("self.level.tiles[{:?}][{:?}].tile_texture.unwrap()", i, n);
+                    for i in 0..self.level.height() {
+                        for n in 0..self.level.width() {
+                            let mut color = self.level.color;
+                            let light = self.level.lightmap[i][n] as f32 / 60.0;
+                            let rgb = color.to_rgb();
+                            color = Color::from_rgb((rgb.0 as f32 * light) as u8, (rgb.1 as f32 * light) as u8, (rgb.2 as f32 * light) as u8);
+
                             let tile = atlas_drawparam_base(ctx, self.level.tiles[i][n].tile_texture.unwrap())
                                 .dest(Point2::new(level::TILE_DIMS * 6.0 * (n as f32 + (max_width / 6.0 / level::TILE_DIMS - level::LEVEL_WIDTH) / 2.0), level::TILE_DIMS * 6.0 * i as f32))
                                 .scale(Vector2::new(6.0, 6.0))
-                                .color(self.level.color);
+                                .color(color);
                             self.spritebatch.add(tile);
                         }
                     }
@@ -515,16 +527,22 @@ enum Modifier {
     TonBoost
 }
 
-struct CameraView {
+pub struct CameraView {
     scale: f32,
-    scroll: Vector2<f32>
+    scroll: Vector2<f32>,
+    inertia: f32
 }
 
 impl CameraView {
     pub fn new() -> Self {
         CameraView {
             scale: 1.0,
-            scroll: Vector2::new(0.0, 0.0)
+            scroll: Vector2::new(0.0, 0.0),
+            inertia: 0.9
         }
+    }
+
+    pub fn set_inertia(&mut self, _ctx: &mut Context, num: f32) {
+        self.inertia = clamp(num, 0.0, 1.0);
     }
 }
