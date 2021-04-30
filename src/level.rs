@@ -80,36 +80,24 @@ impl Level {
             if x<x_max { self.comp_tile(ctx, y, x+1, &tile.tile_type) } else { true },
             if y>0 { self.comp_tile(ctx, y-1, x, &tile.tile_type) } else { true },
         ];
-        let tex_id = if adjacent[0] {
-            if adjacent[1] {
-                if adjacent[2] {
-                    if adjacent[3] { 8 } // 0,1,2,3
-                    else { 3 } // 0,1,2
-                } 
-                else if adjacent[3] { 11 } // 0,1,3
-                else { 9 } // 0,1
-            } 
-            else if adjacent[2] {
-                if adjacent[3] { 12 } // 0,2,3
-                else { 5 } // 0,2
-            }
-            else if adjacent[3] { 10 } // 0,3
-            else { 14 } // 0
-        }
-        else if adjacent[1] { 
-            if adjacent[2] {
-                if adjacent[3] { 4 } // 1,2,3
-                else { 1 } // 1,2
-            }
-            else if adjacent[3] { 13 } // 1,3
-            else { 6 } // 1
-        }
-        else if adjacent[2] {
-            if adjacent[3] { 2 } // 2,3
-            else { 7 } // 2
-        } 
-        else if adjacent[3] { 15 } // 3
-        else { 0 }; // none
+        let tex_id = match adjacent {
+            [true, true, true, true] => { 8 },
+            [true, true, true, false] => { 3 },
+            [true, true, false, true] => { 11 },
+            [true, false, true, true] => { 12 },
+            [false, true, true, true] => { 4 },
+            [true, true, false, false] => { 9 },
+            [true, false, true, false] => { 5 },
+            [false, true, true, false] => { 1 },
+            [true, false, false, true] => { 10 },
+            [false, true, false, true] => { 13 },
+            [false, false, true, true] => { 2 },
+            [true, false, false, false] => { 14 },
+            [false, true, false, false] => { 6 },
+            [false, false, true, false] => { 7 },
+            [false, false, false, true] => { 15 },
+            _ => 0
+        };
         let tex = get_tile_texture_rect(ctx, atlas_region, tex_id);
         self.tiles[x][y].tile_texture = Some(tex);
     }
